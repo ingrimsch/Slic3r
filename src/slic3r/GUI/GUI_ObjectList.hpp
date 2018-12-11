@@ -80,9 +80,10 @@ class ObjectList : public wxDataViewCtrl
     bool		m_prevent_list_events = false;		// We use this flag to avoid circular event handling Select() 
                                                     // happens to fire a wxEVT_LIST_ITEM_SELECTED on OSX, whose event handler 
                                                     // calls this method again and again and again
-// #ifdef __WXOSX__
-//     wxString    m_selected_extruder = "";
-// #endif //__WXOSX__
+
+    bool        m_prevent_update_extruder_in_config = false; // We use this flag to avoid updating of the extruder value in config 
+                                                             // during updating of the extruder count.
+
     bool        m_parts_changed = false;
     bool        m_part_settings_changed = false;
 
@@ -103,23 +104,18 @@ public:
     wxDataViewColumn*   create_objects_list_extruder_column(int extruders_count);
     void                update_objects_list_extruder_column(int extruders_count);
     // show/hide "Extruder" column for Objects List
-    void                set_extruder_column_hidden(bool hide);
+    void                set_extruder_column_hidden(const bool hide) const;
     // update extruder in current config
-    void                update_extruder_in_config(const wxDataViewItem& item/*wxString& selection*/);
+    void                update_extruder_in_config(const wxDataViewItem& item);
+    void                update_extruder_values_for_items(const int max_extruder);
 
     void                init_icons();
 
     void                set_tooltip_for_item(const wxPoint& pt);
 
     void                selection_changed();
-    void                context_menu();
     void                show_context_menu();
     void                key_event(wxKeyEvent& event);
-    void                item_value_change(wxDataViewEvent& event);
-
-    void                on_begin_drag(wxDataViewEvent &event);
-    void                on_drop_possible(wxDataViewEvent &event);
-    void                on_drop(wxDataViewEvent &event);
 
     void                get_settings_choice(const wxString& category_name);
     void                append_menu_item_add_generic(wxMenuItem* menu, const int type);
@@ -202,7 +198,13 @@ public:
     void update_settings_items();
 
 private:
-//     void OnEditingDone(wxDataViewEvent &event);
+    void OnChar(wxKeyEvent& event);
+    void OnContextMenu(wxDataViewEvent &event);
+
+    void OnBeginDrag(wxDataViewEvent &event);
+    void OnDropPossible(wxDataViewEvent &event);
+    void OnDrop(wxDataViewEvent &event);
+
     void ItemValueChanged(wxDataViewEvent &event);
 };
 
