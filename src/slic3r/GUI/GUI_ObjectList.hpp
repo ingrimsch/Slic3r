@@ -53,6 +53,27 @@ struct ItemForDelete
 
 class ObjectList : public wxDataViewCtrl
 {
+
+    struct dragged_item_data
+    {
+        void init(const int obj_idx, const int vol_idx) {
+            m_obj_idx = obj_idx;
+            m_vol_idx = vol_idx;            
+        }
+
+        void clear() {
+            m_obj_idx = -1;
+            m_vol_idx = -1;            
+        }
+
+        int obj_idx() const  { return m_obj_idx; }
+        int vol_idx() const  { return m_vol_idx; }
+
+    private:
+        int m_obj_idx = -1;
+        int m_vol_idx = -1;
+    } m_dragged_data;
+
     wxBoxSizer          *m_sizer {nullptr};
 
     DynamicPrintConfig  *m_default_config {nullptr};
@@ -107,6 +128,8 @@ public:
     void                set_extruder_column_hidden(const bool hide) const;
     // update extruder in current config
     void                update_extruder_in_config(const wxDataViewItem& item);
+    // update changed name in the object model
+    void                update_name_in_model(const wxDataViewItem& item);
     void                update_extruder_values_for_items(const int max_extruder);
 
     void                init_icons();
@@ -206,6 +229,7 @@ private:
     void OnDrop(wxDataViewEvent &event);
 
     void ItemValueChanged(wxDataViewEvent &event);
+    void OnEditingDone(wxDataViewEvent &event);
 };
 
 

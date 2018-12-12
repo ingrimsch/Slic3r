@@ -1311,10 +1311,11 @@ void PrintConfigDef::init_fff_params()
     def->default_value = new ConfigOptionString("");
     
     def = this->add("printhost_cafile", coString);
-    def->label = "HTTPS CA file";
+    def->label = "HTTPS CA File";
     def->tooltip = "Custom CA certificate file can be specified for HTTPS OctoPrint connections, in crt/pem format. "
                    "If left blank, the default OS CA certificate repository is used.";
     def->cli = "printhost-cafile=s";
+    def->mode = comAdvanced;
     def->default_value = new ConfigOptionString("");
 
     def = this->add("print_host", coString);
@@ -2401,6 +2402,13 @@ void PrintConfigDef::init_sla_params()
     def->cli = "display-pixels-y=i";
     def->min = 100;
     def->default_value = new ConfigOptionInt(1440);
+
+    def = this->add("display_flip_xy", coBool);
+    def->label = ("Flip X and Y axis");
+    def->tooltip = L("Flip X and Y axis in the output raster");
+    def->cli = "display-flip-xy=i";
+    def->min = 0;
+    def->default_value = new ConfigOptionBool(true);
 
     def = this->add("printer_correction", coFloats);
     def->full_label = L("Printer scaling correction");

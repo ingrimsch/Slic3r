@@ -68,8 +68,10 @@ static const float UNIT_MATRIX[] = { 1.0f, 0.0f, 0.0f, 0.0f,
                                      0.0f, 0.0f, 1.0f, 0.0f,
                                      0.0f, 0.0f, 0.0f, 1.0f };
 
-static const float DEFAULT_BG_COLOR[3] = { 10.0f / 255.0f, 98.0f / 255.0f, 144.0f / 255.0f };
-static const float ERROR_BG_COLOR[3] = { 144.0f / 255.0f, 49.0f / 255.0f, 10.0f / 255.0f };
+static const float DEFAULT_BG_DARK_COLOR[3] = { 0.478f, 0.478f, 0.478f };
+static const float DEFAULT_BG_LIGHT_COLOR[3] = { 0.753f, 0.753f, 0.753f };
+static const float ERROR_BG_DARK_COLOR[3] = { 0.478f, 0.192f, 0.039f };
+static const float ERROR_BG_LIGHT_COLOR[3] = { 0.753f, 0.192f, 0.039f };
 
 namespace Slic3r {
 namespace GUI {
@@ -579,7 +581,7 @@ void GLCanvas3D::Bed::_render_custom() const
 
         ::glEnableClientState(GL_VERTEX_ARRAY);
 
-        ::glColor4f(0.8f, 0.6f, 0.5f, 0.4f);
+        ::glColor4f(0.35f, 0.35f, 0.35f, 0.4f);
         ::glNormal3d(0.0f, 0.0f, 1.0f);
         ::glVertexPointer(3, GL_FLOAT, 0, (GLvoid*)m_triangles.get_vertices());
         ::glDrawArrays(GL_TRIANGLES, 0, (GLsizei)triangles_vcount);
@@ -4092,7 +4094,8 @@ void GLCanvas3D::reload_scene(bool refresh_immediately, bool force_full_scene_re
 
     m_reload_delayed = ! m_canvas->IsShown() && ! refresh_immediately && ! force_full_scene_refresh;
 
-    PrinterTechnology printer_technology = m_process->current_printer_technology();
+    PrinterTechnology printer_technology        = m_process->current_printer_technology();
+    int               volume_idx_wipe_tower_old = -1;
 
     if (m_regenerate_volumes)
     {
@@ -4150,6 +4153,11 @@ void GLCanvas3D::reload_scene(bool refresh_immediately, bool force_full_scene_re
             }
             if (mvs == nullptr || force_full_scene_refresh) {
                 // This GLVolume will be released.
+                if (volume->is_wipe_tower) {
+                    // There is only one wipe tower.
+                    assert(volume_idx_wipe_tower_old == -1);
+                    volume_idx_wipe_tower_old = (int)volume_id;
+                }
                 volume->release_geometry();
                 if (! m_reload_delayed)
                     delete volume;
@@ -4317,8 +4325,11 @@ void GLCanvas3D::reload_scene(bool refresh_immediately, bool force_full_scene_re
                 float depth = print->get_wipe_tower_depth();
                 if (!print->is_step_done(psWipeTower))
                     depth = (900.f/w) * (float)(extruders_count - 1) ;
-                m_volumes.load_wipe_tower_preview(1000, x, y, w, depth, (float)height, a, m_use_VBOs && m_initialized, !print->is_step_done(psWipeTower),
-                                                  print->config().nozzle_diameter.values[0] * 1.25f * 4.5f);
+                int volume_idx_wipe_tower_new = m_volumes.load_wipe_tower_preview(
+                    1000, x, y, w, depth, (float)height, a, m_use_VBOs && m_initialized, !print->is_step_done(psWipeTower),
+                    print->config().nozzle_diameter.values[0] * 1.25f * 4.5f);
+                if (volume_idx_wipe_tower_old != -1)
+                    map_glvolume_old_to_new[volume_idx_wipe_tower_old] = volume_idx_wipe_tower_new;
             }
         }
 
@@ -5810,14 +5821,18 @@ void GLCanvas3D::_render_background() const
     ::glDisable(GL_DEPTH_TEST);
 
     ::glBegin(GL_QUADS);
-    ::glColor3f(0.0f, 0.0f, 0.0f);
+    if (m_dynamic_background_enabled && _is_any_volume_outside())
+        ::glColor3fv(ERROR_BG_DARK_COLOR);
+    else
+        ::glColor3fv(DEFAULT_BG_DARK_COLOR);
+
     ::glVertex2f(-1.0f, -1.0f);
     ::glVertex2f(1.0f, -1.0f);
 
     if (m_dynamic_background_enabled && _is_any_volume_outside())
-        ::glColor3fv(ERROR_BG_COLOR);
+        ::glColor3fv(ERROR_BG_LIGHT_COLOR);
     else
-        ::glColor3fv(DEFAULT_BG_COLOR);
+        ::glColor3fv(DEFAULT_BG_LIGHT_COLOR);
 
     ::glVertex2f(1.0f, 1.0f);
     ::glVertex2f(-1.0f, 1.0f);

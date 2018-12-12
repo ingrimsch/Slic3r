@@ -75,9 +75,15 @@ ObjectList::ObjectList(wxWindow* parent) :
     Bind(wxEVT_DATAVIEW_ITEM_DROP_POSSIBLE, &ObjectList::OnDropPossible,    this);
     Bind(wxEVT_DATAVIEW_ITEM_DROP,          &ObjectList::OnDrop,            this);
 
+    Bind(wxEVT_DATAVIEW_ITEM_EDITING_DONE,  &ObjectList::OnEditingDone,     this);
+
     Bind(wxEVT_DATAVIEW_ITEM_VALUE_CHANGED, &ObjectList::ItemValueChanged,  this);
 
     Bind(wxCUSTOMEVT_LAST_VOLUME_IS_DELETED, [this](wxCommandEvent& e)   { last_volume_is_deleted(e.GetInt()); });
+
+#ifdef __WXOSX__
+    Bind(wxEVT_KEY_DOWN, &ObjectList::OnChar, this);
+#endif //__WXOSX__
 }
 
 ObjectList::~ObjectList()
@@ -92,10 +98,6 @@ void ObjectList::create_objects_ctrl()
     // 1. set a height of the list to some big value 
     // 2. change it to the normal min value (200) after first whole App updating/layouting
     SetMinSize(wxSize(-1, 1500));   // #ys_FIXME 
-
-#ifdef __WXOSX__
-    Connect(wxEVT_CHAR, wxKeyEventHandler(ObjectList::OnChar), NULL, this);
-#endif //__WXOSX__
 
     m_sizer = new wxBoxSizer(wxVERTICAL);
     m_sizer->Add(this, 1, wxGROW | wxLEFT, 20);
@@ -290,6 +292,21 @@ void ObjectList::update_extruder_in_config(const wxDataViewItem& item)
     wxGetApp().plater()->update();
 }
 
+void ObjectList::update_name_in_model(const wxDataViewItem& item)
+{
+    const int obj_idx = m_objects_model->GetObjectIdByItem(item);
+    if (obj_idx < 0) return;
+
+    if (m_objects_model->GetParent(item) == wxDataViewItem(0)) {
+        (*m_objects)[obj_idx]->name = m_objects_model->GetName(item).ToStdString();
+        return;
+    }
+
+    const int volume_id = m_objects_model->GetVolumeIdByItem(item);
+    if (volume_id < 0) return;
+    (*m_objects)[obj_idx]->volumes[volume_id]->name = m_objects_model->GetName(item).ToStdString();
+}
+
 void ObjectList::init_icons()
 {
     m_bmp_modifiermesh      = wxBitmap(from_u8(var("lambda.png")), wxBITMAP_TYPE_PNG);//(Slic3r::var("plugin.png")), wxBITMAP_TYPE_PNG);
@@ -337,14 +354,13 @@ void ObjectList::selection_changed()
 
 void ObjectList::OnChar(wxKeyEvent& event)
 {
-    if (event.GetKeyCode() == WXK_DELETE && event.GetKeyCode() == WXK_BACK){
-        printf("WXK_BACK\n");
+    if (event.GetKeyCode() == WXK_BACK){
         remove();
     }
     else if (wxGetKeyState(wxKeyCode('A')) && wxGetKeyState(WXK_SHIFT))
         select_item_all_children();
-    else
-        event.Skip();
+
+    event.Skip();
 }
 
 void ObjectList::OnContextMenu(wxDataViewEvent&)
@@ -369,15 +385,14 @@ void ObjectList::OnContextMenu(wxDataViewEvent&)
 
     if (title == " ")
         show_context_menu();
-
-        else if (title == _("Name") && pt.x >15 &&
-                    m_objects_model->GetBitmap(item).GetRefData() == m_bmp_manifold_warning.GetRefData())
-        {
-            if (is_windows10()) {
-                const auto obj_idx = m_objects_model->GetIdByItem(m_objects_model->GetTopParent(item));
-                wxGetApp().plater()->fix_through_netfabb(obj_idx);
-            }
+    else if (title == _("Name") && pt.x >15 &&
+             m_objects_model->GetBitmap(item).GetRefData() == m_bmp_manifold_warning.GetRefData())
+    {
+        if (is_windows10()) {
+            const auto obj_idx = m_objects_model->GetIdByItem(m_objects_model->GetTopParent(item));
+            wxGetApp().plater()->fix_through_netfabb(obj_idx);
         }
+    }
 #ifndef __WXMSW__
     GetMainWindow()->SetToolTip(""); // hide tooltip
 #endif //__WXMSW__
@@ -424,18 +439,12 @@ void ObjectList::key_event(wxKeyEvent& event)
         event.Skip();
 }
 
-struct draging_item_data
-{
-    int obj_idx;
-    int vol_idx;
-};
-
 void ObjectList::OnBeginDrag(wxDataViewEvent &event)
 {
-    wxDataViewItem item(event.GetItem());
+    const wxDataViewItem item(event.GetItem());
 
     // only allow drags for item, not containers
-    if (multiple_selection() ||
+    if (multiple_selection() || GetSelection()!=item || 
         m_objects_model->GetParent(item) == wxDataViewItem(0) ||
         m_objects_model->GetItemType(item) != itVolume ) {
         event.Veto();
@@ -449,11 +458,10 @@ void ObjectList::OnBeginDrag(wxDataViewEvent &event)
     **/
     m_prevent_list_events = true;//it's needed for GTK
 
-    wxTextDataObject *obj = new wxTextDataObject;
-    obj->SetText(wxString::Format("%d", m_objects_model->GetVolumeIdByItem(item)));
-    event.SetDataObject(obj);
-    event.SetDragFlags(/*wxDrag_AllowMove*/wxDrag_DefaultMove); // allows both copy and move;
-    printf("BeginDrag\n");
+    m_dragged_data.init(m_objects_model->GetObjectIdByItem(item), m_objects_model->GetVolumeIdByItem(item));
+
+    event.SetDataObject(new wxTextDataObject);
+    event.SetDragFlags(wxDrag_DefaultMove); // allows both copy and move;
 }
 
 void ObjectList::OnDropPossible(wxDataViewEvent &event)
@@ -461,28 +469,26 @@ void ObjectList::OnDropPossible(wxDataViewEvent &event)
     wxDataViewItem item(event.GetItem());
 
     // only allow drags for item or background, not containers
-    if (event.GetDataFormat() != wxDF_UNICODETEXT || item.IsOk() && 
-        (m_objects_model->GetParent(item) == wxDataViewItem(0) || m_objects_model->GetItemType(item) != itVolume))
+    if (!item.IsOk() ||
+        m_objects_model->GetParent(item) == wxDataViewItem(0) || 
+        m_objects_model->GetItemType(item) != itVolume ||
+        m_dragged_data.obj_idx() != m_objects_model->GetObjectIdByItem(item))
         event.Veto();
-    printf("DropPossible\n");
 }
 
 void ObjectList::OnDrop(wxDataViewEvent &event)
 {
     wxDataViewItem item(event.GetItem());
 
-    if (m_selected_object_id < 0 || event.GetDataFormat() != wxDF_UNICODETEXT || 
-        item.IsOk() && ( m_objects_model->GetParent(item) == wxDataViewItem(0) ||
-                         m_objects_model->GetItemType(item) != itVolume) ) {
+    if (!item.IsOk() || m_objects_model->GetParent(item) == wxDataViewItem(0) ||
+                        m_objects_model->GetItemType(item) != itVolume ||
+                        m_dragged_data.obj_idx() != m_objects_model->GetObjectIdByItem(item)) {
         event.Veto();
+        m_dragged_data.clear();
         return;
     }
-    printf("Drop\n");
 
-    wxTextDataObject obj;
-    obj.SetData(wxDF_UNICODETEXT, event.GetDataSize(), event.GetDataBuffer());
-
-    int from_volume_id = std::stoi(obj.GetText().ToStdString());
+    const int from_volume_id = m_dragged_data.vol_idx();
     int to_volume_id = m_objects_model->GetVolumeIdByItem(item);
 
 #ifdef __WXGTK__
@@ -505,7 +511,7 @@ void ObjectList::OnDrop(wxDataViewEvent &event)
     m_parts_changed = true;
     parts_changed(m_selected_object_id);
 
-    printf("DropCompleted\n");
+    m_dragged_data.clear();
 
 //     m_prevent_list_events = false;
 }
@@ -1675,7 +1681,22 @@ void ObjectList::update_settings_items()
 
 void ObjectList::ItemValueChanged(wxDataViewEvent &event)
 {
-    update_extruder_in_config(event.GetItem());
+    if (event.GetColumn() == 0)
+        update_name_in_model(event.GetItem());
+    else if (event.GetColumn() == 1)
+        update_extruder_in_config(event.GetItem());
+}
+
+void ObjectList::OnEditingDone(wxDataViewEvent &event)
+{
+    if (event.GetColumn() != 0)
+        return;
+
+    const auto renderer = dynamic_cast<PrusaBitmapTextRenderer*>(GetColumn(0)->GetRenderer());
+
+    if (renderer->WasCanceled())
+        show_error(this, _(L("The supplied name is not valid;")) + "\n" +
+                         _(L("the following characters are not allowed:")) + " <>:/\\|?*\"");
 }
 
 } //namespace GUI
